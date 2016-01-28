@@ -1,0 +1,9 @@
+<resources>
+    <string name="app_name">FFmpegRecorder</string>
+    <string name="pause">Pause</string>
+    <string name="resume">Resume</string>
+    <string name="done">Done</string>
+    <string name="video_path">Video path:</string>
+    <string name="video_too_short">Video is too short.</string>
+    <string name="processing">Processing...</string>
+</resources>
