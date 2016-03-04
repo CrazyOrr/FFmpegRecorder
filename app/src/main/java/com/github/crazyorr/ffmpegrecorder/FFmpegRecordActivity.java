@@ -476,17 +476,37 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
         public void run() {
             List<String> filters = new ArrayList<>();
             // Transpose
-            String transpose;
-            if (mCameraId == Camera.CameraInfo.CAMERA_FACING_FRONT) {
-//            transpose = "transpose=clock_flip"; // Same as preview display
-                transpose = "transpose=cclock"; // Mirrored horizontally as preview display
+            String transpose = null;
+            android.hardware.Camera.CameraInfo info =
+                    new android.hardware.Camera.CameraInfo();
+            android.hardware.Camera.getCameraInfo(mCameraId, info);
+            if (info.facing == Camera.CameraInfo.CAMERA_FACING_FRONT) {
+                switch (info.orientation) {
+                    case 270:
+//                        transpose = "transpose=clock_flip"; // Same as preview display
+                        transpose = "transpose=cclock"; // Mirrored horizontally as preview display
+                        break;
+                    case 90:
+//                        transpose = "transpose=cclock_flip"; // Same as preview display
+                        transpose = "transpose=clock"; // Mirrored horizontally as preview display
+                        break;
+                }
             } else {
-                transpose = "transpose=clock";
+                switch (info.orientation) {
+                    case 270:
+                        transpose = "transpose=cclock";
+                        break;
+                    case 90:
+                        transpose = "transpose=clock";
+                        break;
+                }
             }
-            filters.add(transpose);
+            if (transpose != null) {
+                filters.add(transpose);
+            }
             // Crop (only vertically)
             int width = previewHeight;
-            int height = width  * videoHeight / videoWidth;
+            int height = width * videoHeight / videoWidth;
             String crop = String.format("crop=%d:%d:%d:%d",
                     width, height,
                     (previewHeight - width) / 2, (previewWidth - height) / 2);
