@@ -296,7 +296,7 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
     private void stopPreview() {
         if (mCamera != null) {
             mCamera.stopPreview();
-            mCamera.setPreviewCallback(null);
+            mCamera.setPreviewCallbackWithBuffer(null);
         }
     }
 
