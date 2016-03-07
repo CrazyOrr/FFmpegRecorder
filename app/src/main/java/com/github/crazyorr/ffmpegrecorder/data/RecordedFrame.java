@@ -1,22 +1,32 @@
 package com.github.crazyorr.ffmpegrecorder.data;
 
+import org.bytedeco.javacv.Frame;
+
 /**
  * Created by wanglei02 on 2016/1/21.
  */
 public class RecordedFrame {
     private long timestamp;
-    private byte[] data;
+    private Frame frame;
 
-    public RecordedFrame(long timestamp, byte[] data) {
+    public RecordedFrame(long timestamp, Frame frame) {
         this.timestamp = timestamp;
-        this.data = data;
-    }
-
-    public byte[] getData() {
-        return data;
+        this.frame = frame;
     }
 
     public long getTimestamp() {
         return timestamp;
+    }
+
+    public void setTimestamp(long timestamp) {
+        this.timestamp = timestamp;
+    }
+
+    public Frame getFrame() {
+        return frame;
+    }
+
+    public void setFrame(Frame frame) {
+        this.frame = frame;
     }
 }

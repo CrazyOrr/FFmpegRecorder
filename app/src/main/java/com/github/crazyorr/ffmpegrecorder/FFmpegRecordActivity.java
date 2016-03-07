@@ -37,6 +37,7 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Stack;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 
 import butterknife.Bind;
@@ -73,6 +74,7 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
     private volatile boolean mRecording = false;
     private File mVideo;
     private LinkedBlockingQueue<RecordedFrame> mRecordedFrameQueue;
+    private ConcurrentLinkedQueue<RecordedFrame> mRecycledFrameQueue;
     private int mRecordedFrameCount;
     private int mProcessedFrameCount;
     private long mTotalProcessFrameTime;
@@ -87,6 +89,8 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
     private int videoWidth = 320;
     private int videoHeight = 240;
     private int frameRate = 30;
+    private int frameDepth = Frame.DEPTH_UBYTE;
+    private int frameChannels = 2;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -231,7 +235,10 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
         mCamera.setDisplayOrientation(CameraHelper.getCameraDisplayOrientation(
                 this, mCameraId));
 
-        mCamera.setPreviewCallback(new Camera.PreviewCallback() {
+        // YCbCr_420_SP (NV21) format
+        byte[] bufferByte = new byte[previewWidth * previewHeight * 3 / 2];
+        mCamera.addCallbackBuffer(bufferByte);
+        mCamera.setPreviewCallbackWithBuffer(new Camera.PreviewCallback() {
             @Override
             public void onPreviewFrame(byte[] data, Camera camera) {
                 // get video data
@@ -252,14 +259,29 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
                     // check if exceeds time limit
                     if (curRecordedTime > MAX_VIDEO_LENGTH) {
                         new FinishRecordingTask().execute();
+                        return;
                     }
+
+                    long timestamp = 1000 * curRecordedTime;
+                    Frame frame;
+                    RecordedFrame recordedFrame = mRecycledFrameQueue.poll();
+                    if (recordedFrame != null) {
+                        frame = recordedFrame.getFrame();
+                        recordedFrame.setTimestamp(timestamp);
+                    } else {
+                        frame = new Frame(previewWidth, previewHeight, frameDepth, frameChannels);
+                        recordedFrame = new RecordedFrame(timestamp, frame);
+                    }
+                    ((ByteBuffer) frame.image[0].position(0)).put(data);
+
                     try {
-                        mRecordedFrameQueue.put(new RecordedFrame(1000 * curRecordedTime, data));
+                        mRecordedFrameQueue.put(recordedFrame);
                         mRecordedFrameCount++;
                     } catch (InterruptedException e) {
                         e.printStackTrace();
                     }
                 }
+                mCamera.addCallbackBuffer(data);
             }
         });
 
@@ -295,6 +317,7 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
 
     private void initRecorder() {
         mRecordedFrameQueue = new LinkedBlockingQueue<>();
+        mRecycledFrameQueue = new ConcurrentLinkedQueue<>();
         mRecordFragments = new Stack<>();
 
         Log.i(LOG_TAG, "init mFrameRecorder");
@@ -315,6 +338,7 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
 
     private void releaseRecorder() {
         mRecordedFrameQueue = null;
+        mRecycledFrameQueue = null;
         mRecordFragments = null;
 
         if (mFrameRecorder != null) {
@@ -525,7 +549,6 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
                 e.printStackTrace();
             }
 
-            Frame frame = new Frame(previewWidth, previewHeight, Frame.DEPTH_UBYTE, 2);
             isRunning = true;
             RecordedFrame recordedFrame;
 
@@ -553,61 +576,57 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
                 in case the recorded frame queue gets bigger and bigger,
                 eventually run out of memory. */
                 frameIndex = (frameIndex + 1) % step;
-                if (frameIndex != 0) {
-                    continue;
-                }
-
-                if (mFrameRecorder != null) {
-                    ((ByteBuffer) frame.image[0].position(0)).put(recordedFrame.getData());
-
-                    try {
-                        Log.v(LOG_TAG, "Writing Frame");
+                if (frameIndex == 0) {
+                    if (mFrameRecorder != null) {
                         long timestamp = recordedFrame.getTimestamp();
                         if (timestamp > mFrameRecorder.getTimestamp()) {
                             mFrameRecorder.setTimestamp(timestamp);
                         }
+                        long startTime = System.currentTimeMillis();
+                        Frame filteredFrame = null;
                         try {
-                            long startTime = System.currentTimeMillis();
-                            frameFilter.push(frame);
-                            Frame filteredFrame = frameFilter.pull();
-                            mFrameRecorder.record(filteredFrame, avutil.AV_PIX_FMT_NV21);
-                            long endTime = System.currentTimeMillis();
-                            long processTime = endTime - startTime;
-                            processFrameTimeSample[sampleIndex] = processTime;
-                            mTotalProcessFrameTime += processTime;
-                            Log.d(LOG_TAG, "this process time: " + processTime);
-                            long totalAvg = mTotalProcessFrameTime / mProcessedFrameCount;
-                            Log.d(LOG_TAG, "avg process time: " + totalAvg);
-                            // TODO looking for a better way to adjust the process time per frame, hopefully to keep up with the onPreviewFrame callback frequency
-                            if (sampleIndex == SAMPLE_LENGTH - 1) {
-                                long sampleSum = 0;
-                                for (long pft : processFrameTimeSample) {
-                                    sampleSum += pft;
-                                }
-                                long sampleAvg = sampleSum / SAMPLE_LENGTH;
-                                double tolerance = 0.25;
-                                if (sampleAvg > totalAvg * (1 + tolerance)) {
-                                    // ignore more frames
-                                    step++;
-                                    Log.i(LOG_TAG, "increase step to " + step);
-                                } else if (sampleAvg < totalAvg * (1 - tolerance)) {
-                                    // ignore less frames
-                                    if (step > 1) {
-                                        step--;
-                                        Log.i(LOG_TAG, "decrease step to " + step);
-                                    }
-                                }
-                            }
-                            sampleIndex = (sampleIndex + 1) % SAMPLE_LENGTH;
+                            frameFilter.push(recordedFrame.getFrame());
+                            filteredFrame = frameFilter.pull();
                         } catch (FrameFilter.Exception e) {
                             e.printStackTrace();
                         }
-                    } catch (FFmpegFrameRecorder.Exception e) {
-                        Log.v(LOG_TAG, e.getMessage());
-                        e.printStackTrace();
+                        try {
+                            mFrameRecorder.record(filteredFrame, avutil.AV_PIX_FMT_NV21);
+                        } catch (FFmpegFrameRecorder.Exception e) {
+                            e.printStackTrace();
+                        }
+                        long endTime = System.currentTimeMillis();
+                        long processTime = endTime - startTime;
+                        processFrameTimeSample[sampleIndex] = processTime;
+                        mTotalProcessFrameTime += processTime;
+                        Log.d(LOG_TAG, "this process time: " + processTime);
+                        long totalAvg = mTotalProcessFrameTime / mProcessedFrameCount;
+                        Log.d(LOG_TAG, "avg process time: " + totalAvg);
+                        // TODO looking for a better way to adjust the process time per frame, hopefully to keep up with the onPreviewFrame callback frequency
+                        if (sampleIndex == SAMPLE_LENGTH - 1) {
+                            long sampleSum = 0;
+                            for (long pft : processFrameTimeSample) {
+                                sampleSum += pft;
+                            }
+                            long sampleAvg = sampleSum / SAMPLE_LENGTH;
+                            double tolerance = 0.25;
+                            if (sampleAvg > totalAvg * (1 + tolerance)) {
+                                // ignore more frames
+                                step++;
+                                Log.i(LOG_TAG, "increase step to " + step);
+                            } else if (sampleAvg < totalAvg * (1 - tolerance)) {
+                                // ignore less frames
+                                if (step > 1) {
+                                    step--;
+                                    Log.i(LOG_TAG, "decrease step to " + step);
+                                }
+                            }
+                        }
+                        sampleIndex = (sampleIndex + 1) % SAMPLE_LENGTH;
                     }
                 }
                 Log.d(LOG_TAG, mProcessedFrameCount + " / " + mRecordedFrameCount);
+                mRecycledFrameQueue.offer(recordedFrame);
             }
         }
 
