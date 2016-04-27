@@ -1,4 +1,6 @@
 # FFmpegRecorder
+![Screenshot](https://github.com/CrazyOrr/FFmpegRecorder/blob/master/screenshots/1.jpg)
+
 This is an Android video recorder that supports:
 * Pause and resume when recording like Vine
 * Crop and scale the output video to designated size
