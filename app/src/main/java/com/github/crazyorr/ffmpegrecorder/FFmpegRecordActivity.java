@@ -40,9 +40,6 @@ import java.util.Stack;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 
-import butterknife.Bind;
-import butterknife.ButterKnife;
-
 import static java.lang.Thread.State.WAITING;
 
 public class FFmpegRecordActivity extends AppCompatActivity implements
@@ -56,14 +53,10 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
     private static final long MIN_VIDEO_LENGTH = 1 * 1000;
     private static final long MAX_VIDEO_LENGTH = 90 * 1000;
 
-    @Bind(R.id.camera_preview)
-    FixedRatioCroppedTextureView mPreview;
-    @Bind(R.id.btn_resume_or_pause)
-    Button mBtnResumeOrPause;
-    @Bind(R.id.btn_done)
-    Button mBtnDone;
-    @Bind(R.id.btn_switch_camera)
-    Button mBtnSwitchCamera;
+    private FixedRatioCroppedTextureView mPreview;
+    private Button mBtnResumeOrPause;
+    private Button mBtnDone;
+    private Button mBtnSwitchCamera;
 
     private int mCameraId;
     private Camera mCamera;
@@ -96,7 +89,10 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_ffmpeg_record);
-        ButterKnife.bind(this);
+        mPreview = (FixedRatioCroppedTextureView) findViewById(R.id.camera_preview);
+        mBtnResumeOrPause = (Button) findViewById(R.id.btn_resume_or_pause);
+        mBtnDone = (Button) findViewById(R.id.btn_done);
+        mBtnSwitchCamera = (Button) findViewById(R.id.btn_switch_camera);
 
 //        mCameraId = Camera.CameraInfo.CAMERA_FACING_BACK;
         mCameraId = Camera.CameraInfo.CAMERA_FACING_FRONT;
@@ -175,39 +171,39 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
 
     @Override
     public void onClick(View v) {
-        switch (v.getId()) {
-            case R.id.btn_resume_or_pause:
-                if (mRecording) {
-                    pauseRecording();
-                } else {
-                    resumeRecording();
-                }
-                break;
-            case R.id.btn_done:
+        int i = v.getId();
+        if (i == R.id.btn_resume_or_pause) {
+            if (mRecording) {
                 pauseRecording();
-                // check video length
-                if (calculateTotalRecordedTime(mRecordFragments) < MIN_VIDEO_LENGTH) {
-                    Toast.makeText(this, R.string.video_too_short, Toast.LENGTH_SHORT).show();
-                    return;
+            } else {
+                resumeRecording();
+            }
+
+        } else if (i == R.id.btn_done) {
+            pauseRecording();
+            // check video length
+            if (calculateTotalRecordedTime(mRecordFragments) < MIN_VIDEO_LENGTH) {
+                Toast.makeText(this, R.string.video_too_short, Toast.LENGTH_SHORT).show();
+                return;
+            }
+            new FinishRecordingTask().execute();
+
+        } else if (i == R.id.btn_switch_camera) {
+            new Thread() {
+                @Override
+                public void run() {
+                    stopRecording();
+                    stopPreview();
+                    releaseCamera();
+
+                    mCameraId = (mCameraId + 1) % 2;
+
+                    acquireCamera();
+                    startPreview(mPreview.getSurfaceTexture());
+                    startRecording();
                 }
-                new FinishRecordingTask().execute();
-                break;
-            case R.id.btn_switch_camera:
-                new Thread() {
-                    @Override
-                    public void run() {
-                        stopRecording();
-                        stopPreview();
-                        releaseCamera();
+            }.start();
 
-                        mCameraId = (mCameraId + 1) % 2;
-
-                        acquireCamera();
-                        startPreview(mPreview.getSurfaceTexture());
-                        startRecording();
-                    }
-                }.start();
-                break;
         }
     }
 

@@ -7,17 +7,11 @@ import android.widget.MediaController;
 import android.widget.TextView;
 import android.widget.VideoView;
 
-import butterknife.Bind;
-import butterknife.ButterKnife;
-
 public class PlaybackActivity extends AppCompatActivity {
 
     public static final String INTENT_NAME_VIDEO_PATH = "INTENT_NAME_VIDEO_PATH";
 
-    @Bind(R.id.tv_video_path)
-    TextView mTvVideoPath;
-    @Bind(R.id.vv_playback)
-    VideoView mVvPlayback;
+    private VideoView mVvPlayback;
 
     private int mVideoCurPos;
 
@@ -25,14 +19,15 @@ public class PlaybackActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_playback);
-        ButterKnife.bind(this);
+        TextView tvVideoPath = (TextView) findViewById(R.id.tv_video_path);
+        mVvPlayback = (VideoView) findViewById(R.id.vv_playback);
 
         String path = getIntent().getStringExtra(INTENT_NAME_VIDEO_PATH);
         if (path == null) {
             finish();
         }
 
-        mTvVideoPath.setText(path);
+        tvVideoPath.setText(path);
         mVvPlayback.setVideoPath(path);
         mVvPlayback.setKeepScreenOn(true);
         mVvPlayback.setMediaController(new MediaController(this));
