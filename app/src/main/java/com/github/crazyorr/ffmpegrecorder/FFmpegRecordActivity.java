@@ -208,6 +208,7 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
             }.execute();
 
         } else if (i == R.id.btn_reset) {
+            mBtnReset.setVisibility(View.INVISIBLE);
             pauseRecording();
             new ProgressDialogTask<Void, Integer, Void>(R.string.please_wait) {
 
