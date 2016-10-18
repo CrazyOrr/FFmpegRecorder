@@ -37,5 +37,4 @@ These core features use FFmpegFrameRecorder, FFmpegFrameFilter from [JavaCV][1].
 [4]: https://github.com/sourab-sharma/TouchToRecord
 [5]: https://github.com/qdrzwd/VideoRecorder
 
-[![Bitdeli Badge](https://d2weczhvl823v0.cloudfront.net/CrazyOrr/ffmpegrecorder/trend.png)](https://bitdeli.com/free "Bitdeli Badge")
 
