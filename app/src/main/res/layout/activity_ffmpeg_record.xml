@@ -17,11 +17,19 @@
         android:layout_height="wrap_content">
 
         <Button
+            android:id="@+id/btn_reset"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_alignParentLeft="true"
+            android:text="@string/reset"
+            android:visibility="invisible" />
+
+        <Button
             android:id="@+id/btn_switch_camera"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_alignParentRight="true"
-            android:text="Switch" />
+            android:text="@string/switch_camera" />
 
     </RelativeLayout>
 
@@ -48,7 +56,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="@string/resume"/>
+            android:text="@string/resume" />
 
         <Button
             android:id="@+id/btn_done"

@@ -57,6 +57,7 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
     private Button mBtnResumeOrPause;
     private Button mBtnDone;
     private Button mBtnSwitchCamera;
+    private Button mBtnReset;
 
     private int mCameraId;
     private Camera mCamera;
@@ -93,6 +94,7 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
         mBtnResumeOrPause = (Button) findViewById(R.id.btn_resume_or_pause);
         mBtnDone = (Button) findViewById(R.id.btn_done);
         mBtnSwitchCamera = (Button) findViewById(R.id.btn_switch_camera);
+        mBtnReset = (Button) findViewById(R.id.btn_reset);
 
 //        mCameraId = Camera.CameraInfo.CAMERA_FACING_BACK;
         mCameraId = Camera.CameraInfo.CAMERA_FACING_FRONT;
@@ -103,6 +105,11 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
         mBtnResumeOrPause.setOnClickListener(this);
         mBtnDone.setOnClickListener(this);
         mBtnSwitchCamera.setOnClickListener(this);
+        mBtnReset.setOnClickListener(this);
+
+        mRecordedFrameQueue = new LinkedBlockingQueue<>();
+        mRecycledFrameQueue = new ConcurrentLinkedQueue<>();
+        mRecordFragments = new Stack<>();
     }
 
     @Override
@@ -118,20 +125,21 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
         acquireCamera();
         SurfaceTexture surfaceTexture = mPreview.getSurfaceTexture();
         if (surfaceTexture != null) {
+            // SurfaceTexture already created
             startPreview(surfaceTexture);
-            if (mFrameRecorder == null) {
-                new Thread() {
-                    @Override
-                    public void run() {
-                        initRecorder();
-                        startRecorder();
-                        startRecording();
-                    }
-                }.start();
-            } else {
-                startRecording();
-            }
         }
+        new ProgressDialogTask<Void, Integer, Void>(R.string.initiating) {
+
+            @Override
+            protected Void doInBackground(Void... params) {
+                if (mFrameRecorder == null) {
+                    initRecorder();
+                    startRecorder();
+                }
+                startRecording();
+                return null;
+            }
+        }.execute();
     }
 
     @Override
@@ -145,15 +153,7 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
 
     @Override
     public void onSurfaceTextureAvailable(final SurfaceTexture surface, int width, int height) {
-        new Thread() {
-            @Override
-            public void run() {
-                initRecorder();
-                startPreview(surface);
-                startRecorder();
-                startRecording();
-            }
-        }.start();
+        startPreview(surface);
     }
 
     @Override
@@ -189,9 +189,11 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
             new FinishRecordingTask().execute();
 
         } else if (i == R.id.btn_switch_camera) {
-            new Thread() {
+            final SurfaceTexture surfaceTexture = mPreview.getSurfaceTexture();
+            new ProgressDialogTask<Void, Integer, Void>(R.string.please_wait) {
+
                 @Override
-                public void run() {
+                protected Void doInBackground(Void... params) {
                     stopRecording();
                     stopPreview();
                     releaseCamera();
@@ -199,11 +201,28 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
                     mCameraId = (mCameraId + 1) % 2;
 
                     acquireCamera();
-                    startPreview(mPreview.getSurfaceTexture());
+                    startPreview(surfaceTexture);
                     startRecording();
+                    return null;
                 }
-            }.start();
+            }.execute();
 
+        } else if (i == R.id.btn_reset) {
+            pauseRecording();
+            new ProgressDialogTask<Void, Integer, Void>(R.string.please_wait) {
+
+                @Override
+                protected Void doInBackground(Void... params) {
+                    stopRecording();
+                    stopRecorder(false);
+                    releaseRecorder();
+
+                    initRecorder();
+                    startRecorder();
+                    startRecording();
+                    return null;
+                }
+            }.execute();
         }
     }
 
@@ -254,6 +273,7 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
                             - curFragment.getStartTimestamp() + recordedTime;
                     // check if exceeds time limit
                     if (curRecordedTime > MAX_VIDEO_LENGTH) {
+                        pauseRecording();
                         new FinishRecordingTask().execute();
                         return;
                     }
@@ -312,10 +332,6 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
     }
 
     private void initRecorder() {
-        mRecordedFrameQueue = new LinkedBlockingQueue<>();
-        mRecycledFrameQueue = new ConcurrentLinkedQueue<>();
-        mRecordFragments = new Stack<>();
-
         Log.i(LOG_TAG, "init mFrameRecorder");
 
         String recordedTime = new SimpleDateFormat("yyyyMMdd_HHmmss").format(new Date());
@@ -333,9 +349,9 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
     }
 
     private void releaseRecorder() {
-        mRecordedFrameQueue = null;
-        mRecycledFrameQueue = null;
-        mRecordFragments = null;
+        mRecordedFrameQueue.clear();
+        mRecycledFrameQueue.clear();
+        mRecordFragments.clear();
 
         if (mFrameRecorder != null) {
             try {
@@ -406,6 +422,7 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
             runOnUiThread(new Runnable() {
                 @Override
                 public void run() {
+                    mBtnReset.setVisibility(View.VISIBLE);
                     mBtnSwitchCamera.setVisibility(View.INVISIBLE);
                     mBtnResumeOrPause.setText(R.string.pause);
                 }
@@ -634,13 +651,43 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
         }
     }
 
-    class FinishRecordingTask extends AsyncTask<Void, Integer, Void> {
+    abstract class ProgressDialogTask<Params, Progress, Result> extends AsyncTask<Params, Progress, Result> {
 
-        ProgressDialog mProgressDialog;
+        private int promptRes;
+        private ProgressDialog mProgressDialog;
+
+        public ProgressDialogTask(int promptRes) {
+            this.promptRes = promptRes;
+        }
+
+        @Override
+        protected void onPreExecute() {
+            super.onPreExecute();
+            mProgressDialog = ProgressDialog.show(FFmpegRecordActivity.this,
+                    null, getString(promptRes), true);
+        }
+
+        @Override
+        protected void onProgressUpdate(Progress... values) {
+            super.onProgressUpdate(values);
+//            mProgressDialog.setProgress(values[0]);
+        }
+
+        @Override
+        protected void onPostExecute(Result result) {
+            super.onPostExecute(result);
+            mProgressDialog.dismiss();
+        }
+    }
+
+    class FinishRecordingTask extends ProgressDialogTask<Void, Integer, Void> {
+
+        public FinishRecordingTask() {
+            super(R.string.processing);
+        }
 
         @Override
         protected Void doInBackground(Void... params) {
-            pauseRecording();
             stopRecording();
             stopRecorder(true);
             releaseRecorder();
@@ -648,26 +695,12 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
         }
 
         @Override
-        protected void onPreExecute() {
-            super.onPreExecute();
-            mProgressDialog = ProgressDialog.show(FFmpegRecordActivity.this,
-                    null, getString(R.string.processing), true);
-        }
-
-        @Override
         protected void onPostExecute(Void aVoid) {
             super.onPostExecute(aVoid);
-            mProgressDialog.dismiss();
 
             Intent intent = new Intent(FFmpegRecordActivity.this, PlaybackActivity.class);
             intent.putExtra(PlaybackActivity.INTENT_NAME_VIDEO_PATH, mVideo.getPath());
             startActivity(intent);
-        }
-
-        @Override
-        protected void onProgressUpdate(Integer... values) {
-            super.onProgressUpdate(values);
-//            mProgressDialog.setProgress(values[0]);
         }
     }
 }
