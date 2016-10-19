@@ -9,6 +9,36 @@
 
 # Add any project specific keep options here:
 
+# Note: You may need to upgrade your proguard in the Android SDK.
+# See https://github.com/bytedeco/javacv/wiki/Configuring-Proguard-for-JavaCV
+-keepattributes *Annotation*
+
+# JavaCV
+-keep @org.bytedeco.javacpp.annotation interface * {
+    *;
+}
+
+-keep @org.bytedeco.javacpp.annotation.Platform public class *
+
+-keepclasseswithmembernames class * {
+    @org.bytedeco.* <fields>;
+}
+
+-keepclasseswithmembernames class * {
+    @org.bytedeco.* <methods>;
+}
+
+-keepattributes EnclosingMethod
+-keep @interface org.bytedeco.javacpp.annotation.*,javax.inject.*
+
+-keepattributes *Annotation*, Exceptions, Signature, Deprecated, SourceFile, SourceDir, LineNumberTable, LocalVariableTable, LocalVariableTypeTable, Synthetic, EnclosingMethod, RuntimeVisibleAnnotations, RuntimeInvisibleAnnotations, RuntimeVisibleParameterAnnotations, RuntimeInvisibleParameterAnnotations, AnnotationDefault, InnerClasses
+-keep class org.bytedeco.javacpp.** {*;}
+-dontwarn java.awt.**
+-dontwarn org.bytedeco.javacv.**
+-dontwarn org.bytedeco.javacpp.**
+
+# end Javacv
+
 # If your project uses WebView with JS, uncomment the following
 # and specify the fully qualified class name to the JavaScript interface
 # class:
