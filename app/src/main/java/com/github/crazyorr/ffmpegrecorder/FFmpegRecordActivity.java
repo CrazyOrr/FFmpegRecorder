@@ -572,7 +572,7 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
             long[] processFrameTimeSample = new long[SAMPLE_LENGTH];
             int sampleIndex = 0;
 
-            while (isRunning) {
+            while (isRunning || !mRecordedFrameQueue.isEmpty()) {
                 try {
                     recordedFrame = mRecordedFrameQueue.take();
                 } catch (InterruptedException ie) {
@@ -645,10 +645,10 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
         }
 
         public void stopRunning() {
-            while (getState() != WAITING) {
-            }
             this.isRunning = false;
-            interrupt();
+            if (getState() == WAITING) {
+                interrupt();
+            }
         }
     }
 
