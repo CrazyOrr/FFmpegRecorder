@@ -8,9 +8,9 @@ android {
     defaultConfig {
         applicationId "com.github.crazyorr.ffmpegrecorder"
         minSdkVersion 14
-        targetSdkVersion 22
+        targetSdkVersion 24
         versionCode 1
-        versionName "1.0"
+        versionName "1.0.0"
     }
     buildTypes {
         release {

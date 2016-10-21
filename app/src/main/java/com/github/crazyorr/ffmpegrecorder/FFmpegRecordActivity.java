@@ -1,7 +1,9 @@
 package com.github.crazyorr.ffmpegrecorder;
 
+import android.Manifest;
 import android.app.ProgressDialog;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.graphics.SurfaceTexture;
 import android.hardware.Camera;
 import android.media.AudioFormat;
@@ -9,6 +11,9 @@ import android.media.AudioRecord;
 import android.media.MediaRecorder;
 import android.os.AsyncTask;
 import android.os.Bundle;
+import android.support.annotation.NonNull;
+import android.support.v4.app.ActivityCompat;
+import android.support.v4.content.ContextCompat;
 import android.support.v7.app.AppCompatActivity;
 import android.text.TextUtils;
 import android.util.Log;
@@ -45,6 +50,8 @@ import static java.lang.Thread.State.WAITING;
 public class FFmpegRecordActivity extends AppCompatActivity implements
         TextureView.SurfaceTextureListener, View.OnClickListener {
     private static final String LOG_TAG = FFmpegRecordActivity.class.getSimpleName();
+
+    private static final int REQUEST_PERMISSIONS = 1;
 
     private static final int PREFERRED_PREVIEW_WIDTH = 640;
     private static final int PREFERRED_PREVIEW_HEIGHT = 480;
@@ -86,6 +93,9 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
     private int frameDepth = Frame.DEPTH_UBYTE;
     private int frameChannels = 2;
 
+    // Workaround for https://code.google.com/p/android/issues/detail?id=190966
+    private Runnable doAfterAllPermissionsGranted;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -122,24 +132,30 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
     @Override
     protected void onResume() {
         super.onResume();
-        acquireCamera();
-        SurfaceTexture surfaceTexture = mPreview.getSurfaceTexture();
-        if (surfaceTexture != null) {
-            // SurfaceTexture already created
-            startPreview(surfaceTexture);
-        }
-        new ProgressDialogTask<Void, Integer, Void>(R.string.initiating) {
 
-            @Override
-            protected Void doInBackground(Void... params) {
-                if (mFrameRecorder == null) {
-                    initRecorder();
-                    startRecorder();
+        if (doAfterAllPermissionsGranted != null) {
+            doAfterAllPermissionsGranted.run();
+        } else {
+            String[] neededPermissions = {
+                    Manifest.permission.CAMERA,
+                    Manifest.permission.RECORD_AUDIO,
+                    Manifest.permission.WRITE_EXTERNAL_STORAGE,
+            };
+            List<String> deniedPermissions = new ArrayList<>();
+            for (String permission : neededPermissions) {
+                if (ContextCompat.checkSelfPermission(this, permission) != PackageManager.PERMISSION_GRANTED) {
+                    deniedPermissions.add(permission);
                 }
-                startRecording();
-                return null;
             }
-        }.execute();
+            if (deniedPermissions.isEmpty()) {
+                // All permissions are granted
+                doAfterAllPermissionsGranted();
+            } else {
+                String[] array = new String[deniedPermissions.size()];
+                array = deniedPermissions.toArray(array);
+                ActivityCompat.requestPermissions(this, array, REQUEST_PERMISSIONS);
+            }
+        }
     }
 
     @Override
@@ -149,6 +165,36 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
         stopRecording();
         stopPreview();
         releaseCamera();
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == REQUEST_PERMISSIONS) {
+            boolean permissionsAllGranted = true;
+            for (int grantResult : grantResults) {
+                if (grantResult != PackageManager.PERMISSION_GRANTED) {
+                    permissionsAllGranted = false;
+                    break;
+                }
+            }
+            if (permissionsAllGranted) {
+                doAfterAllPermissionsGranted = new Runnable() {
+                    @Override
+                    public void run() {
+                        doAfterAllPermissionsGranted();
+                    }
+                };
+            } else {
+                doAfterAllPermissionsGranted = new Runnable() {
+                    @Override
+                    public void run() {
+                        Toast.makeText(FFmpegRecordActivity.this, R.string.permissions_denied_exit, Toast.LENGTH_SHORT).show();
+                        finish();
+                    }
+                };
+            }
+        }
     }
 
     @Override
@@ -225,6 +271,27 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
                 }
             }.execute();
         }
+    }
+
+    private void doAfterAllPermissionsGranted() {
+        acquireCamera();
+        SurfaceTexture surfaceTexture = mPreview.getSurfaceTexture();
+        if (surfaceTexture != null) {
+            // SurfaceTexture already created
+            startPreview(surfaceTexture);
+        }
+        new ProgressDialogTask<Void, Integer, Void>(R.string.initiating) {
+
+            @Override
+            protected Void doInBackground(Void... params) {
+                if (mFrameRecorder == null) {
+                    initRecorder();
+                    startRecorder();
+                }
+                startRecording();
+                return null;
+            }
+        }.execute();
     }
 
     private void startPreview(SurfaceTexture surfaceTexture) {
