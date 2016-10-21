@@ -20,8 +20,21 @@ android {
     }
 }
 
+// Workaround for Gradle
+// See: https://github.com/bytedeco/javacpp-presets/wiki/Issues-with-Build-Tools
+configurations {
+    all*.exclude group: 'org.bytedeco', module: 'javacpp-presets'
+}
+
 dependencies {
     compile fileTree(dir: 'libs', include: ['*.jar'])
     testCompile 'junit:junit:4.12'
     compile 'com.android.support:appcompat-v7:24.2.1'
+    // See: https://github.com/bytedeco/javacv/issues/412
+    compile group: 'org.bytedeco', name: 'javacpp', version: '1.2.4'
+    compile(group: 'org.bytedeco', name: 'javacv', version: '1.2') {
+        exclude group: 'org.bytedeco.javacpp-presets'
+    }
+    compile group: 'org.bytedeco.javacpp-presets', name: 'ffmpeg', version: '3.0.2-1.2'
+    compile group: 'org.bytedeco.javacpp-presets', name: 'ffmpeg', version: '3.0.2-1.2', classifier: 'android-arm'
 }
