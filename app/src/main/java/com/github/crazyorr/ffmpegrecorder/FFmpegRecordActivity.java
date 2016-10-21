@@ -135,6 +135,7 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
 
         if (doAfterAllPermissionsGranted != null) {
             doAfterAllPermissionsGranted.run();
+            doAfterAllPermissionsGranted = null;
         } else {
             String[] neededPermissions = {
                     Manifest.permission.CAMERA,
