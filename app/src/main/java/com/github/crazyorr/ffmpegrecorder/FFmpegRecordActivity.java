@@ -22,8 +22,8 @@ import android.view.View;
 import android.widget.Button;
 import android.widget.Toast;
 
+import com.github.crazyorr.ffmpegrecorder.data.FrameToRecord;
 import com.github.crazyorr.ffmpegrecorder.data.RecordFragment;
-import com.github.crazyorr.ffmpegrecorder.data.RecordedFrame;
 import com.github.crazyorr.ffmpegrecorder.util.CameraHelper;
 
 import org.bytedeco.javacpp.avcodec;
@@ -43,6 +43,7 @@ import java.util.Date;
 import java.util.List;
 import java.util.Stack;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
 
 import static java.lang.Thread.State.WAITING;
@@ -70,12 +71,11 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
     private Camera mCamera;
     private FFmpegFrameRecorder mFrameRecorder;
     private VideoRecordThread mVideoRecordThread;
-    private AudioRecord mAudioRecord;
-    private AudioRecordThread mAudioRecordThread;
+    private AudioRecordRunnable audioRecordRunnable;
     private volatile boolean mRecording = false;
     private File mVideo;
-    private LinkedBlockingQueue<RecordedFrame> mRecordedFrameQueue;
-    private ConcurrentLinkedQueue<RecordedFrame> mRecycledFrameQueue;
+    private LinkedBlockingQueue<FrameToRecord> mFrameToRecordQueue;
+    private ConcurrentLinkedQueue<FrameToRecord> mRecycledFrameQueue;
     private int mRecordedFrameCount;
     private int mProcessedFrameCount;
     private long mTotalProcessFrameTime;
@@ -117,7 +117,7 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
         mBtnSwitchCamera.setOnClickListener(this);
         mBtnReset.setOnClickListener(this);
 
-        mRecordedFrameQueue = new LinkedBlockingQueue<>();
+        mFrameToRecordQueue = new LinkedBlockingQueue<>();
         mRecycledFrameQueue = new ConcurrentLinkedQueue<>();
         mRecordFragments = new Stack<>();
     }
@@ -125,8 +125,8 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        stopRecorder(false);
-        releaseRecorder();
+        stopRecorder();
+        releaseRecorder(true);
     }
 
     @Override
@@ -164,6 +164,7 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
         super.onPause();
         pauseRecording();
         stopRecording();
+        releaseAudioRecorder();
         stopPreview();
         releaseCamera();
     }
@@ -255,17 +256,14 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
             }.execute();
 
         } else if (i == R.id.btn_reset) {
-            mBtnReset.setVisibility(View.INVISIBLE);
             pauseRecording();
             new ProgressDialogTask<Void, Integer, Void>(R.string.please_wait) {
 
                 @Override
                 protected Void doInBackground(Void... params) {
                     stopRecording();
-                    stopRecorder(false);
-                    releaseRecorder();
+                    stopRecorder();
 
-                    initRecorder();
                     startRecorder();
                     startRecording();
                     return null;
@@ -289,6 +287,7 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
                     initRecorder();
                     startRecorder();
                 }
+                initAudioRecorder();
                 startRecording();
                 return null;
             }
@@ -323,47 +322,55 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
         byte[] bufferByte = new byte[previewWidth * previewHeight * 3 / 2];
         mCamera.addCallbackBuffer(bufferByte);
         mCamera.setPreviewCallbackWithBuffer(new Camera.PreviewCallback() {
+
+            private long lastPreviewFrameTime;
+
             @Override
             public void onPreviewFrame(byte[] data, Camera camera) {
+                long thisPreviewFrameTime = System.currentTimeMillis();
+                if (lastPreviewFrameTime > 0) {
+                    Log.d(LOG_TAG, "Preview frame interval: " + (thisPreviewFrameTime - lastPreviewFrameTime) + "ms");
+                }
+                lastPreviewFrameTime = thisPreviewFrameTime;
+
                 // get video data
                 if (mRecording) {
-                    // wait for AudioRecord to init and start
-                    if (mAudioRecord == null || mAudioRecord.getRecordingState() != AudioRecord.RECORDSTATE_RECORDING) {
+                    if (audioRecordRunnable == null || !audioRecordRunnable.isRunning()) {
+                        // wait for AudioRecord to init and start
                         mRecordFragments.peek().setStartTimestamp(System.currentTimeMillis());
-                        return;
-                    }
-
-                    // pop the current record fragment when calculate total recorded time
-                    RecordFragment curFragment = mRecordFragments.pop();
-                    long recordedTime = calculateTotalRecordedTime(mRecordFragments);
-                    // push it back after calculation
-                    mRecordFragments.push(curFragment);
-                    long curRecordedTime = System.currentTimeMillis()
-                            - curFragment.getStartTimestamp() + recordedTime;
-                    // check if exceeds time limit
-                    if (curRecordedTime > MAX_VIDEO_LENGTH) {
-                        pauseRecording();
-                        new FinishRecordingTask().execute();
-                        return;
-                    }
-
-                    long timestamp = 1000 * curRecordedTime;
-                    Frame frame;
-                    RecordedFrame recordedFrame = mRecycledFrameQueue.poll();
-                    if (recordedFrame != null) {
-                        frame = recordedFrame.getFrame();
-                        recordedFrame.setTimestamp(timestamp);
                     } else {
-                        frame = new Frame(previewWidth, previewHeight, frameDepth, frameChannels);
-                        recordedFrame = new RecordedFrame(timestamp, frame);
-                    }
-                    ((ByteBuffer) frame.image[0].position(0)).put(data);
+                        // pop the current record fragment when calculate total recorded time
+                        RecordFragment curFragment = mRecordFragments.pop();
+                        long recordedTime = calculateTotalRecordedTime(mRecordFragments);
+                        // push it back after calculation
+                        mRecordFragments.push(curFragment);
+                        long curRecordedTime = System.currentTimeMillis()
+                                - curFragment.getStartTimestamp() + recordedTime;
+                        // check if exceeds time limit
+                        if (curRecordedTime > MAX_VIDEO_LENGTH) {
+                            pauseRecording();
+                            new FinishRecordingTask().execute();
+                            return;
+                        }
 
-                    try {
-                        mRecordedFrameQueue.put(recordedFrame);
-                        mRecordedFrameCount++;
-                    } catch (InterruptedException e) {
-                        e.printStackTrace();
+                        long timestamp = 1000 * curRecordedTime;
+                        Frame frame;
+                        FrameToRecord frameToRecord = mRecycledFrameQueue.poll();
+                        if (frameToRecord != null) {
+                            frame = frameToRecord.getFrame();
+                            frameToRecord.setTimestamp(timestamp);
+                        } else {
+                            frame = new Frame(previewWidth, previewHeight, frameDepth, frameChannels);
+                            frameToRecord = new FrameToRecord(timestamp, frame);
+                        }
+                        ((ByteBuffer) frame.image[0].position(0)).put(data);
+
+                        try {
+                            mFrameToRecordQueue.put(frameToRecord);
+                            mRecordedFrameCount++;
+                        } catch (InterruptedException e) {
+                            e.printStackTrace();
+                        }
                     }
                 }
                 mCamera.addCallbackBuffer(data);
@@ -417,19 +424,19 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
         Log.i(LOG_TAG, "mFrameRecorder initialize success");
     }
 
-    private void releaseRecorder() {
-        mRecordedFrameQueue.clear();
-        mRecycledFrameQueue.clear();
-        mRecordFragments.clear();
-
+    private void releaseRecorder(boolean deleteFile) {
         if (mFrameRecorder != null) {
             try {
                 mFrameRecorder.release();
             } catch (FFmpegFrameRecorder.Exception e) {
                 e.printStackTrace();
             }
+            mFrameRecorder = null;
+
+            if (deleteFile) {
+                mVideo.delete();
+            }
         }
-        mFrameRecorder = null;
     }
 
     private void startRecorder() {
@@ -440,39 +447,40 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
         }
     }
 
-    private void stopRecorder(boolean saveFile) {
+    private void stopRecorder() {
         if (mFrameRecorder != null) {
             try {
                 mFrameRecorder.stop();
             } catch (FFmpegFrameRecorder.Exception e) {
                 e.printStackTrace();
             }
-            if (!saveFile) {
-                mVideo.delete();
-            }
         }
+
+        mRecordFragments.clear();
+
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                mBtnReset.setVisibility(View.INVISIBLE);
+            }
+        });
+    }
+
+    private void initAudioRecorder() {
+        audioRecordRunnable = new AudioRecordRunnable();
+    }
+
+    private void releaseAudioRecorder() {
+        audioRecordRunnable.release();
     }
 
     private void startRecording() {
         mVideoRecordThread = new VideoRecordThread();
         mVideoRecordThread.start();
-
-        mAudioRecordThread = new AudioRecordThread();
-        mAudioRecordThread.start();
     }
 
     private void stopRecording() {
-        if (mAudioRecordThread != null) {
-            mAudioRecordThread.stopRunning();
-            try {
-                mAudioRecordThread.join();
-            } catch (InterruptedException e) {
-                e.printStackTrace();
-            }
-            mAudioRecordThread = null;
-        }
-
-        if (mVideoRecordThread != null) {
+        if (mVideoRecordThread != null && mVideoRecordThread.isRunning()) {
             mVideoRecordThread.stopRunning();
             try {
                 mVideoRecordThread.join();
@@ -481,6 +489,9 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
             }
             mVideoRecordThread = null;
         }
+
+        mFrameToRecordQueue.clear();
+        mRecycledFrameQueue.clear();
     }
 
     private void resumeRecording() {
@@ -497,6 +508,7 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
                 }
             });
             mRecording = true;
+            new Thread(audioRecordRunnable).start();
         }
     }
 
@@ -511,6 +523,7 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
                 }
             });
             mRecording = false;
+            audioRecordRunnable.stop();
         }
     }
 
@@ -522,23 +535,28 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
         return recordedTime;
     }
 
-    class AudioRecordThread extends Thread {
+    class AudioRecordRunnable implements Runnable {
 
         private boolean isRunning;
+        private AudioRecord mAudioRecord;
+        private ShortBuffer audioData;
+        private CountDownLatch latch;
 
-        @Override
-        public void run() {
-            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO);
-
-            // Audio
+        public AudioRecordRunnable() {
             int bufferSize = AudioRecord.getMinBufferSize(sampleAudioRateInHz,
                     AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
             mAudioRecord = new AudioRecord(MediaRecorder.AudioSource.MIC, sampleAudioRateInHz,
                     AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, bufferSize);
 
-            ShortBuffer audioData = ShortBuffer.allocate(bufferSize);
+            audioData = ShortBuffer.allocate(bufferSize);
+        }
 
-            Log.d(LOG_TAG, "mAudioRecord.startRecording()");
+        @Override
+        public void run() {
+            latch = new CountDownLatch(1);
+            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO);
+
+            Log.d(LOG_TAG, "mAudioRecord startRecording");
             mAudioRecord.startRecording();
 
             isRunning = true;
@@ -558,19 +576,33 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
                     }
                 }
             }
-            Log.v(LOG_TAG, "AudioThread Finished, release mAudioRecord");
-
-            /* encoding finish, release mFrameRecorder */
-            if (mAudioRecord != null) {
-                mAudioRecord.stop();
-                mAudioRecord.release();
-                mAudioRecord = null;
-                Log.v(LOG_TAG, "mAudioRecord released");
-            }
+            Log.d(LOG_TAG, "mAudioRecord stopRecording");
+            mAudioRecord.stop();
+            latch.countDown();
         }
 
-        public void stopRunning() {
+        public boolean isRunning() {
+            return isRunning;
+        }
+
+        public void stop() {
             this.isRunning = false;
+        }
+
+        public void release() {
+            if (latch == null) {
+                return;
+            }
+            try {
+                latch.await();
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+            if (mAudioRecord != null) {
+                mAudioRecord.release();
+                mAudioRecord = null;
+                Log.d(LOG_TAG, "mAudioRecord released");
+            }
         }
     }
 
@@ -632,7 +664,7 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
             }
 
             isRunning = true;
-            RecordedFrame recordedFrame;
+            FrameToRecord recordedFrame;
 
             int frameIndex = 0;
             int step = 1;
@@ -640,9 +672,9 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
             long[] processFrameTimeSample = new long[SAMPLE_LENGTH];
             int sampleIndex = 0;
 
-            while (isRunning || !mRecordedFrameQueue.isEmpty()) {
+            while (isRunning || !mFrameToRecordQueue.isEmpty()) {
                 try {
-                    recordedFrame = mRecordedFrameQueue.take();
+                    recordedFrame = mFrameToRecordQueue.take();
                 } catch (InterruptedException ie) {
                     ie.printStackTrace();
                     try {
@@ -681,9 +713,9 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
                         long processTime = endTime - startTime;
                         processFrameTimeSample[sampleIndex] = processTime;
                         mTotalProcessFrameTime += processTime;
-                        Log.d(LOG_TAG, "this process time: " + processTime);
+                        Log.d(LOG_TAG, "This frame process time: " + processTime + "ms");
                         long totalAvg = mTotalProcessFrameTime / mProcessedFrameCount;
-                        Log.d(LOG_TAG, "avg process time: " + totalAvg);
+                        Log.d(LOG_TAG, "Avg frame process time: " + totalAvg + "ms");
                         // TODO looking for a better way to adjust the process time per frame, hopefully to keep up with the onPreviewFrame callback frequency
                         if (sampleIndex == SAMPLE_LENGTH - 1) {
                             long sampleSum = 0;
@@ -717,6 +749,10 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
             if (getState() == WAITING) {
                 interrupt();
             }
+        }
+
+        public boolean isRunning() {
+            return isRunning;
         }
     }
 
@@ -758,8 +794,8 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
         @Override
         protected Void doInBackground(Void... params) {
             stopRecording();
-            stopRecorder(true);
-            releaseRecorder();
+            stopRecorder();
+            releaseRecorder(false);
             return null;
         }
 

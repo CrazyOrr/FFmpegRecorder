@@ -5,11 +5,11 @@ import org.bytedeco.javacv.Frame;
 /**
  * Created by wanglei02 on 2016/1/21.
  */
-public class RecordedFrame {
+public class FrameToRecord {
     private long timestamp;
     private Frame frame;
 
-    public RecordedFrame(long timestamp, Frame frame) {
+    public FrameToRecord(long timestamp, Frame frame) {
         this.timestamp = timestamp;
         this.frame = frame;
     }
