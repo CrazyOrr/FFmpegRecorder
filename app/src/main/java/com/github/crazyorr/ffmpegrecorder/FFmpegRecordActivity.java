@@ -471,7 +471,10 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
     }
 
     private void releaseAudioRecorder() {
-        audioRecordRunnable.release();
+        if (audioRecordRunnable != null) {
+            audioRecordRunnable.release();
+            audioRecordRunnable = null;
+        }
     }
 
     private void startRecording() {
