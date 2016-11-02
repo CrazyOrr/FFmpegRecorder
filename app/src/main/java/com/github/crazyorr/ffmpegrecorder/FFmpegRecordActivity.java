@@ -76,8 +76,8 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
     private File mVideo;
     private LinkedBlockingQueue<FrameToRecord> mFrameToRecordQueue;
     private ConcurrentLinkedQueue<FrameToRecord> mRecycledFrameQueue;
-    private int mRecordedFrameCount;
-    private int mProcessedFrameCount;
+    private int mFrameToRecordCount;
+    private int mFrameRecordedCount;
     private long mTotalProcessFrameTime;
     private Stack<RecordFragment> mRecordFragments;
 
@@ -367,7 +367,7 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
 
                         try {
                             mFrameToRecordQueue.put(frameToRecord);
-                            mRecordedFrameCount++;
+                            mFrameToRecordCount++;
                         } catch (InterruptedException e) {
                             e.printStackTrace();
                         }
@@ -420,6 +420,15 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
         mFrameRecorder.setFrameRate(frameRate);
         // Use H264
         mFrameRecorder.setVideoCodec(avcodec.AV_CODEC_ID_H264);
+
+        // See: https://trac.ffmpeg.org/wiki/Encode/H.264#crf
+        /*
+         * The range of the quantizer scale is 0-51: where 0 is lossless, 23 is default, and 51 is worst possible. A lower value is a higher quality and a subjectively sane range is 18-28. Consider 18 to be visually lossless or nearly so: it should look the same or nearly the same as the input but it isn't technically lossless.
+         * The range is exponential, so increasing the CRF value +6 is roughly half the bitrate while -6 is roughly twice the bitrate. General usage is to choose the highest CRF value that still provides an acceptable quality. If the output looks good, then try a higher value and if it looks bad then choose a lower value.
+         */
+        mFrameRecorder.setVideoOption("crf", "28");
+        mFrameRecorder.setVideoOption("preset", "superfast");
+        mFrameRecorder.setVideoOption("tune", "zerolatency");
 
         Log.i(LOG_TAG, "mFrameRecorder initialize success");
     }
@@ -669,12 +678,6 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
             isRunning = true;
             FrameToRecord recordedFrame;
 
-            int frameIndex = 0;
-            int step = 1;
-            final int SAMPLE_LENGTH = 30;
-            long[] processFrameTimeSample = new long[SAMPLE_LENGTH];
-            int sampleIndex = 0;
-
             while (isRunning || !mFrameToRecordQueue.isEmpty()) {
                 try {
                     recordedFrame = mFrameToRecordQueue.take();
@@ -688,61 +691,32 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
                     break;
                 }
 
-                mProcessedFrameCount++;
-                /* Process only 1st frame in every [step] frames,
-                in case the recorded frame queue gets bigger and bigger,
-                eventually run out of memory. */
-                frameIndex = (frameIndex + 1) % step;
-                if (frameIndex == 0) {
-                    if (mFrameRecorder != null) {
-                        long timestamp = recordedFrame.getTimestamp();
-                        if (timestamp > mFrameRecorder.getTimestamp()) {
-                            mFrameRecorder.setTimestamp(timestamp);
-                        }
-                        long startTime = System.currentTimeMillis();
-                        Frame filteredFrame = null;
-                        try {
-                            frameFilter.push(recordedFrame.getFrame());
-                            filteredFrame = frameFilter.pull();
-                        } catch (FrameFilter.Exception e) {
-                            e.printStackTrace();
-                        }
-                        try {
-                            mFrameRecorder.record(filteredFrame, avutil.AV_PIX_FMT_NV21);
-                        } catch (FFmpegFrameRecorder.Exception e) {
-                            e.printStackTrace();
-                        }
-                        long endTime = System.currentTimeMillis();
-                        long processTime = endTime - startTime;
-                        processFrameTimeSample[sampleIndex] = processTime;
-                        mTotalProcessFrameTime += processTime;
-                        Log.d(LOG_TAG, "This frame process time: " + processTime + "ms");
-                        long totalAvg = mTotalProcessFrameTime / mProcessedFrameCount;
-                        Log.d(LOG_TAG, "Avg frame process time: " + totalAvg + "ms");
-                        // TODO looking for a better way to adjust the process time per frame, hopefully to keep up with the onPreviewFrame callback frequency
-                        if (sampleIndex == SAMPLE_LENGTH - 1) {
-                            long sampleSum = 0;
-                            for (long pft : processFrameTimeSample) {
-                                sampleSum += pft;
-                            }
-                            long sampleAvg = sampleSum / SAMPLE_LENGTH;
-                            double tolerance = 0.25;
-                            if (sampleAvg > totalAvg * (1 + tolerance)) {
-                                // ignore more frames
-                                step++;
-                                Log.i(LOG_TAG, "increase step to " + step);
-                            } else if (sampleAvg < totalAvg * (1 - tolerance)) {
-                                // ignore less frames
-                                if (step > 1) {
-                                    step--;
-                                    Log.i(LOG_TAG, "decrease step to " + step);
-                                }
-                            }
-                        }
-                        sampleIndex = (sampleIndex + 1) % SAMPLE_LENGTH;
+                if (mFrameRecorder != null) {
+                    long timestamp = recordedFrame.getTimestamp();
+                    if (timestamp > mFrameRecorder.getTimestamp()) {
+                        mFrameRecorder.setTimestamp(timestamp);
                     }
+                    long startTime = System.currentTimeMillis();
+                    Frame filteredFrame = null;
+                    try {
+                        frameFilter.push(recordedFrame.getFrame());
+                        filteredFrame = frameFilter.pull();
+                    } catch (FrameFilter.Exception e) {
+                        e.printStackTrace();
+                    }
+                    try {
+                        mFrameRecorder.record(filteredFrame, avutil.AV_PIX_FMT_NV21);
+                    } catch (FFmpegFrameRecorder.Exception e) {
+                        e.printStackTrace();
+                    }
+                    long endTime = System.currentTimeMillis();
+                    long processTime = endTime - startTime;
+                    mTotalProcessFrameTime += processTime;
+                    Log.d(LOG_TAG, "This frame process time: " + processTime + "ms");
+                    long totalAvg = mTotalProcessFrameTime / ++mFrameRecordedCount;
+                    Log.d(LOG_TAG, "Avg frame process time: " + totalAvg + "ms");
                 }
-                Log.d(LOG_TAG, mProcessedFrameCount + " / " + mRecordedFrameCount);
+                Log.d(LOG_TAG, mFrameRecordedCount + " / " + mFrameToRecordCount);
                 mRecycledFrameQueue.offer(recordedFrame);
             }
         }
