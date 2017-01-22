@@ -42,7 +42,6 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Stack;
-import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
 
@@ -75,7 +74,7 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
     private volatile boolean mRecording = false;
     private File mVideo;
     private LinkedBlockingQueue<FrameToRecord> mFrameToRecordQueue;
-    private ConcurrentLinkedQueue<FrameToRecord> mRecycledFrameQueue;
+    private LinkedBlockingQueue<FrameToRecord> mRecycledFrameQueue;
     private int mFrameToRecordCount;
     private int mFrameRecordedCount;
     private long mTotalProcessFrameTime;
@@ -117,8 +116,10 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
         mBtnSwitchCamera.setOnClickListener(this);
         mBtnReset.setOnClickListener(this);
 
-        mFrameToRecordQueue = new LinkedBlockingQueue<>();
-        mRecycledFrameQueue = new ConcurrentLinkedQueue<>();
+        // At most buffer 10 Frame
+        mFrameToRecordQueue = new LinkedBlockingQueue<>(10);
+        // At most recycle 2 Frame
+        mRecycledFrameQueue = new LinkedBlockingQueue<>(2);
         mRecordFragments = new Stack<>();
     }
 
@@ -365,11 +366,8 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
                         }
                         ((ByteBuffer) frame.image[0].position(0)).put(data);
 
-                        try {
-                            mFrameToRecordQueue.put(frameToRecord);
+                        if (mFrameToRecordQueue.offer(frameToRecord)) {
                             mFrameToRecordCount++;
-                        } catch (InterruptedException e) {
-                            e.printStackTrace();
                         }
                     }
                 }
