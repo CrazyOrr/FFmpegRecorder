@@ -695,6 +695,7 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
                         mFrameRecorder.setTimestamp(timestamp);
                     }
                     long startTime = System.currentTimeMillis();
+//                    Frame filteredFrame = recordedFrame.getFrame();
                     Frame filteredFrame = null;
                     try {
                         frameFilter.push(recordedFrame.getFrame());
@@ -703,7 +704,7 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
                         e.printStackTrace();
                     }
                     try {
-                        mFrameRecorder.record(filteredFrame, avutil.AV_PIX_FMT_NV21);
+                        mFrameRecorder.record(filteredFrame);
                     } catch (FFmpegFrameRecorder.Exception e) {
                         e.printStackTrace();
                     }
