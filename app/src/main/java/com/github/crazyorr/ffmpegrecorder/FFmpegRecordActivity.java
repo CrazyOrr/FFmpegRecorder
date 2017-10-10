@@ -42,7 +42,6 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Stack;
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
 
 import static java.lang.Thread.State.WAITING;
@@ -70,7 +69,7 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
     private Camera mCamera;
     private FFmpegFrameRecorder mFrameRecorder;
     private VideoRecordThread mVideoRecordThread;
-    private AudioRecordRunnable audioRecordRunnable;
+    private AudioRecordThread mAudioRecordThread;
     private volatile boolean mRecording = false;
     private File mVideo;
     private LinkedBlockingQueue<FrameToRecord> mFrameToRecordQueue;
@@ -165,7 +164,6 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
         super.onPause();
         pauseRecording();
         stopRecording();
-        releaseAudioRecorder();
         stopPreview();
         releaseCamera();
     }
@@ -288,7 +286,6 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
                     initRecorder();
                     startRecorder();
                 }
-                initAudioRecorder();
                 startRecording();
                 return null;
             }
@@ -336,7 +333,7 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
 
                 // get video data
                 if (mRecording) {
-                    if (audioRecordRunnable == null || !audioRecordRunnable.isRunning()) {
+                    if (mAudioRecordThread == null || !mAudioRecordThread.isRunning()) {
                         // wait for AudioRecord to init and start
                         mRecordFragments.peek().setStartTimestamp(System.currentTimeMillis());
                     } else {
@@ -473,32 +470,39 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
         });
     }
 
-    private void initAudioRecorder() {
-        audioRecordRunnable = new AudioRecordRunnable();
-    }
-
-    private void releaseAudioRecorder() {
-        if (audioRecordRunnable != null) {
-            audioRecordRunnable.release();
-            audioRecordRunnable = null;
-        }
-    }
-
     private void startRecording() {
+        mAudioRecordThread = new AudioRecordThread();
+        mAudioRecordThread.start();
         mVideoRecordThread = new VideoRecordThread();
         mVideoRecordThread.start();
     }
 
     private void stopRecording() {
-        if (mVideoRecordThread != null && mVideoRecordThread.isRunning()) {
-            mVideoRecordThread.stopRunning();
-            try {
-                mVideoRecordThread.join();
-            } catch (InterruptedException e) {
-                e.printStackTrace();
+        if (mAudioRecordThread != null) {
+            if (mAudioRecordThread.isRunning()) {
+                mAudioRecordThread.stopRunning();
             }
-            mVideoRecordThread = null;
         }
+
+        if (mVideoRecordThread != null) {
+            if (mVideoRecordThread.isRunning()) {
+                mVideoRecordThread.stopRunning();
+            }
+        }
+
+        try {
+            if (mAudioRecordThread != null) {
+                mAudioRecordThread.join();
+            }
+            if (mVideoRecordThread != null) {
+                mVideoRecordThread.join();
+            }
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+        mAudioRecordThread = null;
+        mVideoRecordThread = null;
+
 
         mFrameToRecordQueue.clear();
         mRecycledFrameQueue.clear();
@@ -518,7 +522,6 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
                 }
             });
             mRecording = true;
-            new Thread(audioRecordRunnable).start();
         }
     }
 
@@ -533,7 +536,6 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
                 }
             });
             mRecording = false;
-            audioRecordRunnable.stop();
         }
     }
 
@@ -545,14 +547,23 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
         return recordedTime;
     }
 
-    class AudioRecordRunnable implements Runnable {
+    class RunningThread extends Thread {
+        boolean isRunning;
 
-        private boolean isRunning;
+        public boolean isRunning() {
+            return isRunning;
+        }
+
+        public void stopRunning() {
+            this.isRunning = false;
+        }
+    }
+
+    class AudioRecordThread extends RunningThread {
         private AudioRecord mAudioRecord;
         private ShortBuffer audioData;
-        private CountDownLatch latch;
 
-        public AudioRecordRunnable() {
+        public AudioRecordThread() {
             int bufferSize = AudioRecord.getMinBufferSize(sampleAudioRateInHz,
                     AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
             mAudioRecord = new AudioRecord(MediaRecorder.AudioSource.MIC, sampleAudioRateInHz,
@@ -563,7 +574,6 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
 
         @Override
         public void run() {
-            latch = new CountDownLatch(1);
             android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO);
 
             Log.d(LOG_TAG, "mAudioRecord startRecording");
@@ -588,38 +598,13 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
             }
             Log.d(LOG_TAG, "mAudioRecord stopRecording");
             mAudioRecord.stop();
-            latch.countDown();
-        }
-
-        public boolean isRunning() {
-            return isRunning;
-        }
-
-        public void stop() {
-            this.isRunning = false;
-        }
-
-        public void release() {
-            if (latch == null) {
-                return;
-            }
-            try {
-                latch.await();
-            } catch (InterruptedException e) {
-                e.printStackTrace();
-            }
-            if (mAudioRecord != null) {
-                mAudioRecord.release();
-                mAudioRecord = null;
-                Log.d(LOG_TAG, "mAudioRecord released");
-            }
+            mAudioRecord.release();
+            mAudioRecord = null;
+            Log.d(LOG_TAG, "mAudioRecord released");
         }
     }
 
-    class VideoRecordThread extends Thread {
-
-        private boolean isRunning;
-
+    class VideoRecordThread extends RunningThread {
         @Override
         public void run() {
             List<String> filters = new ArrayList<>();
@@ -721,14 +706,10 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
         }
 
         public void stopRunning() {
-            this.isRunning = false;
+            super.stopRunning();
             if (getState() == WAITING) {
                 interrupt();
             }
-        }
-
-        public boolean isRunning() {
-            return isRunning;
         }
     }
 
