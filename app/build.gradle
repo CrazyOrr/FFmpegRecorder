@@ -2,13 +2,12 @@ apply plugin: 'com.android.application'
 //apply plugin: 'com.android.library'
 
 android {
-    compileSdkVersion 25
-    buildToolsVersion "25.0.2"
+    compileSdkVersion 26
 
     defaultConfig {
         applicationId "com.github.crazyorr.ffmpegrecorder"
         minSdkVersion 14
-        targetSdkVersion 25
+        targetSdkVersion 26
         versionCode 1
         versionName "1.0.0"
     }
@@ -20,13 +19,19 @@ android {
     }
 }
 
+ext {
+    versions = [
+            'ffmpeg': '3.2.1-1.3'
+    ]
+}
+
 dependencies {
     compile fileTree(dir: 'libs', include: ['*.jar'])
     testCompile 'junit:junit:4.12'
-    compile 'com.android.support:appcompat-v7:25.3.0'
+    compile 'com.android.support:appcompat-v7:26.1.0'
     compile(group: 'org.bytedeco', name: 'javacv-platform', version: '1.3') {
         exclude group: 'org.bytedeco.javacpp-presets'
     }
-    compile group: 'org.bytedeco.javacpp-presets', name: 'ffmpeg', version: '3.2.1-1.3'
-    compile group: 'org.bytedeco.javacpp-presets', name: 'ffmpeg', version: '3.2.1-1.3', classifier: 'android-arm'
+    compile group: 'org.bytedeco.javacpp-presets', name: 'ffmpeg', version: versions.ffmpeg
+    compile group: 'org.bytedeco.javacpp-presets', name: 'ffmpeg', version: versions.ffmpeg, classifier: 'android-arm'
 }
