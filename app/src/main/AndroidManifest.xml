@@ -14,18 +14,14 @@
         android:supportsRtl="true"
         android:theme="@style/AppTheme">
 
-        <activity
-            android:name=".FFmpegRecordActivity"
-            android:screenOrientation="portrait">
+        <activity android:name=".FFmpegRecordActivity">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
 
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-        <activity
-            android:name=".PlaybackActivity"
-            android:screenOrientation="portrait" />
+        <activity android:name=".PlaybackActivity" />
     </application>
 
 </manifest>

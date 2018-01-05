@@ -4,6 +4,7 @@
 This is an Android video recorder that supports:
 * Pause and resume when recording like Vine
 * Crop and scale the output video to designated size
+* Support both portrait and landscape orientation
 
 These core features use FFmpegFrameRecorder, FFmpegFrameFilter from [JavaCV][1].
 

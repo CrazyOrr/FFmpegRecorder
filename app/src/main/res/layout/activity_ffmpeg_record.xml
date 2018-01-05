@@ -12,7 +12,6 @@
     tools:context=".FFmpegRecordActivity">
 
     <RelativeLayout
-        android:id="@+id/layout_top"
         android:layout_width="match_parent"
         android:layout_height="wrap_content">
 
@@ -35,8 +34,7 @@
 
     <FrameLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:background="@android:color/black">
+        android:layout_height="wrap_content">
 
         <com.github.crazyorr.ffmpegrecorder.FixedRatioCroppedTextureView
             android:id="@+id/camera_preview"
@@ -45,7 +43,6 @@
     </FrameLayout>
 
     <LinearLayout
-        android:id="@+id/layout_bottom"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_alignParentBottom="true"

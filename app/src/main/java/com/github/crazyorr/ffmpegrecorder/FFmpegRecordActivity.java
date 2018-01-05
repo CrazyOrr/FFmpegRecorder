@@ -17,6 +17,7 @@ import android.support.v4.content.ContextCompat;
 import android.support.v7.app.AppCompatActivity;
 import android.text.TextUtils;
 import android.util.Log;
+import android.view.Surface;
 import android.view.TextureView;
 import android.view.View;
 import android.widget.Button;
@@ -25,6 +26,7 @@ import android.widget.Toast;
 import com.github.crazyorr.ffmpegrecorder.data.FrameToRecord;
 import com.github.crazyorr.ffmpegrecorder.data.RecordFragment;
 import com.github.crazyorr.ffmpegrecorder.util.CameraHelper;
+import com.github.crazyorr.ffmpegrecorder.util.MiscUtils;
 
 import org.bytedeco.javacpp.avcodec;
 import org.bytedeco.javacpp.avutil;
@@ -82,8 +84,8 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
     private int sampleAudioRateInHz = 44100;
     /* The sides of width and height are based on camera orientation.
     That is, the preview size is the size before it is rotated. */
-    private int previewWidth = PREFERRED_PREVIEW_WIDTH;
-    private int previewHeight = PREFERRED_PREVIEW_HEIGHT;
+    private int mPreviewWidth = PREFERRED_PREVIEW_WIDTH;
+    private int mPreviewHeight = PREFERRED_PREVIEW_HEIGHT;
     // Output video size
     private int videoWidth = 320;
     private int videoHeight = 240;
@@ -106,8 +108,7 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
 
 //        mCameraId = Camera.CameraInfo.CAMERA_FACING_BACK;
         mCameraId = Camera.CameraInfo.CAMERA_FACING_FRONT;
-        // Switch width and height
-        mPreview.setPreviewSize(previewHeight, previewWidth);
+        setPreviewSize(mPreviewWidth, mPreviewHeight);
         mPreview.setCroppedSizeWeight(videoWidth, videoHeight);
         mPreview.setSurfaceTextureListener(this);
         mBtnResumeOrPause.setOnClickListener(this);
@@ -292,6 +293,15 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
         }.execute();
     }
 
+    private void setPreviewSize(int width, int height) {
+        if (MiscUtils.isOrientationLandscape(this)) {
+            mPreview.setPreviewSize(width, height);
+        } else {
+            // Swap width and height
+            mPreview.setPreviewSize(height, width);
+        }
+    }
+
     private void startPreview(SurfaceTexture surfaceTexture) {
         if (mCamera == null) {
             return;
@@ -302,14 +312,13 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
         Camera.Size previewSize = CameraHelper.getOptimalSize(previewSizes,
                 PREFERRED_PREVIEW_WIDTH, PREFERRED_PREVIEW_HEIGHT);
         // if changed, reassign values and request layout
-        if (previewWidth != previewSize.width || previewHeight != previewSize.height) {
-            previewWidth = previewSize.width;
-            previewHeight = previewSize.height;
-            // Switch width and height
-            mPreview.setPreviewSize(previewHeight, previewWidth);
+        if (mPreviewWidth != previewSize.width || mPreviewHeight != previewSize.height) {
+            mPreviewWidth = previewSize.width;
+            mPreviewHeight = previewSize.height;
+            setPreviewSize(mPreviewWidth, mPreviewHeight);
             mPreview.requestLayout();
         }
-        parameters.setPreviewSize(previewWidth, previewHeight);
+        parameters.setPreviewSize(mPreviewWidth, mPreviewHeight);
 //        parameters.setPreviewFormat(ImageFormat.NV21);
         mCamera.setParameters(parameters);
 
@@ -317,7 +326,7 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
                 this, mCameraId));
 
         // YCbCr_420_SP (NV21) format
-        byte[] bufferByte = new byte[previewWidth * previewHeight * 3 / 2];
+        byte[] bufferByte = new byte[mPreviewWidth * mPreviewHeight * 3 / 2];
         mCamera.addCallbackBuffer(bufferByte);
         mCamera.setPreviewCallbackWithBuffer(new Camera.PreviewCallback() {
 
@@ -358,7 +367,7 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
                             frame = frameToRecord.getFrame();
                             frameToRecord.setTimestamp(timestamp);
                         } else {
-                            frame = new Frame(previewWidth, previewHeight, frameDepth, frameChannels);
+                            frame = new Frame(mPreviewWidth, mPreviewHeight, frameDepth, frameChannels);
                             frameToRecord = new FrameToRecord(timestamp, frame);
                         }
                         ((ByteBuffer) frame.image[0].position(0)).put(data);
@@ -607,46 +616,107 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
     class VideoRecordThread extends RunningThread {
         @Override
         public void run() {
+            int previewWidth = mPreviewWidth;
+            int previewHeight = mPreviewHeight;
+
             List<String> filters = new ArrayList<>();
             // Transpose
             String transpose = null;
-            android.hardware.Camera.CameraInfo info =
-                    new android.hardware.Camera.CameraInfo();
-            android.hardware.Camera.getCameraInfo(mCameraId, info);
-            if (info.facing == Camera.CameraInfo.CAMERA_FACING_FRONT) {
-                switch (info.orientation) {
-                    case 270:
-//                        transpose = "transpose=clock_flip"; // Same as preview display
-                        transpose = "transpose=cclock"; // Mirrored horizontally as preview display
-                        break;
-                    case 90:
-//                        transpose = "transpose=cclock_flip"; // Same as preview display
-                        transpose = "transpose=clock"; // Mirrored horizontally as preview display
-                        break;
-                }
-            } else {
-                switch (info.orientation) {
-                    case 270:
-                        transpose = "transpose=cclock";
-                        break;
-                    case 90:
-                        transpose = "transpose=clock";
-                        break;
-                }
+            String hflip = null;
+            String vflip = null;
+            String crop = null;
+            String scale = null;
+            int cropWidth;
+            int cropHeight;
+            Camera.CameraInfo info = new Camera.CameraInfo();
+            Camera.getCameraInfo(mCameraId, info);
+            int rotation = getWindowManager().getDefaultDisplay().getRotation();
+            switch (rotation) {
+                case Surface.ROTATION_0:
+                    switch (info.orientation) {
+                        case 270:
+                            if (info.facing == Camera.CameraInfo.CAMERA_FACING_FRONT) {
+                                transpose = "transpose=clock_flip"; // Same as preview display
+                            } else {
+                                transpose = "transpose=cclock"; // Mirrored horizontally as preview display
+                            }
+                            break;
+                        case 90:
+                            if (info.facing == Camera.CameraInfo.CAMERA_FACING_FRONT) {
+                                transpose = "transpose=cclock_flip"; // Same as preview display
+                            } else {
+                                transpose = "transpose=clock"; // Mirrored horizontally as preview display
+                            }
+                            break;
+                    }
+                    cropWidth = previewHeight;
+                    cropHeight = cropWidth * videoHeight / videoWidth;
+                    crop = String.format("crop=%d:%d:%d:%d",
+                            cropWidth, cropHeight,
+                            (previewHeight - cropWidth) / 2, (previewWidth - cropHeight) / 2);
+                    // swap width and height
+                    scale = String.format("scale=%d:%d", videoHeight, videoWidth);
+                    break;
+                case Surface.ROTATION_90:
+                case Surface.ROTATION_270:
+                    switch (rotation) {
+                        case Surface.ROTATION_90:
+                            // landscape-left
+                            switch (info.orientation) {
+                                case 270:
+                                    if (info.facing == Camera.CameraInfo.CAMERA_FACING_FRONT) {
+                                        hflip = "hflip";
+                                    }
+                                    break;
+                            }
+                            break;
+                        case Surface.ROTATION_270:
+                            // landscape-right
+                            switch (info.orientation) {
+                                case 90:
+                                    if (info.facing == Camera.CameraInfo.CAMERA_FACING_BACK) {
+                                        hflip = "hflip";
+                                        vflip = "vflip";
+                                    }
+                                    break;
+                                case 270:
+                                    if (info.facing == Camera.CameraInfo.CAMERA_FACING_FRONT) {
+                                        vflip = "vflip";
+                                    }
+                                    break;
+                            }
+                            break;
+                    }
+                    cropHeight = previewHeight;
+                    cropWidth = cropHeight * videoWidth / videoHeight;
+                    crop = String.format("crop=%d:%d:%d:%d",
+                            cropWidth, cropHeight,
+                            (previewWidth - cropWidth) / 2, (previewHeight - cropHeight) / 2);
+                    scale = String.format("scale=%d:%d", videoWidth, videoHeight);
+                    break;
+                case Surface.ROTATION_180:
+                    break;
             }
+            // transpose
             if (transpose != null) {
                 filters.add(transpose);
             }
-            // Crop (only vertically)
-            int width = previewHeight;
-            int height = width * videoHeight / videoWidth;
-            String crop = String.format("crop=%d:%d:%d:%d",
-                    width, height,
-                    (previewHeight - width) / 2, (previewWidth - height) / 2);
-            filters.add(crop);
-            // Scale (to designated size)
-            String scale = String.format("scale=%d:%d", videoHeight, videoWidth);
-            filters.add(scale);
+            // horizontal flip
+            if (hflip != null) {
+                filters.add(hflip);
+            }
+            // vertical flip
+            if (vflip != null) {
+                filters.add(vflip);
+            }
+            // crop
+            if (crop != null) {
+                filters.add(crop);
+            }
+            // scale (to designated size)
+            if (scale != null) {
+                filters.add(scale);
+            }
 
             FFmpegFrameFilter frameFilter = new FFmpegFrameFilter(TextUtils.join(",", filters),
                     previewWidth, previewHeight);
