@@ -100,11 +100,11 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_ffmpeg_record);
-        mPreview = (FixedRatioCroppedTextureView) findViewById(R.id.camera_preview);
-        mBtnResumeOrPause = (Button) findViewById(R.id.btn_resume_or_pause);
-        mBtnDone = (Button) findViewById(R.id.btn_done);
-        mBtnSwitchCamera = (Button) findViewById(R.id.btn_switch_camera);
-        mBtnReset = (Button) findViewById(R.id.btn_reset);
+        mPreview = findViewById(R.id.camera_preview);
+        mBtnResumeOrPause = findViewById(R.id.btn_resume_or_pause);
+        mBtnDone = findViewById(R.id.btn_done);
+        mBtnSwitchCamera = findViewById(R.id.btn_switch_camera);
+        mBtnReset = findViewById(R.id.btn_reset);
 
 //        mCameraId = Camera.CameraInfo.CAMERA_FACING_BACK;
         mCameraId = Camera.CameraInfo.CAMERA_FACING_FRONT;
@@ -422,9 +422,9 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
         mFrameRecorder.setFormat("mp4");
         mFrameRecorder.setSampleRate(sampleAudioRateInHz);
         mFrameRecorder.setFrameRate(frameRate);
+
         // Use H264
         mFrameRecorder.setVideoCodec(avcodec.AV_CODEC_ID_H264);
-
         // See: https://trac.ffmpeg.org/wiki/Encode/H.264#crf
         /*
          * The range of the quantizer scale is 0-51: where 0 is lossless, 23 is default, and 51 is worst possible. A lower value is a higher quality and a subjectively sane range is 18-28. Consider 18 to be visually lossless or nearly so: it should look the same or nearly the same as the input but it isn't technically lossless.
