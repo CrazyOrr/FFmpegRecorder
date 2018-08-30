@@ -320,6 +320,10 @@ public class FFmpegRecordActivity extends AppCompatActivity implements
         }
         parameters.setPreviewSize(mPreviewWidth, mPreviewHeight);
 //        parameters.setPreviewFormat(ImageFormat.NV21);
+        if (parameters.getSupportedFocusModes().contains(
+                Camera.Parameters.FOCUS_MODE_CONTINUOUS_VIDEO)) {
+            parameters.setFocusMode(Camera.Parameters.FOCUS_MODE_CONTINUOUS_VIDEO);
+        }
         mCamera.setParameters(parameters);
 
         mCamera.setDisplayOrientation(CameraHelper.getCameraDisplayOrientation(
